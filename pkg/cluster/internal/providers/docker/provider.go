@@ -93,6 +93,108 @@ func (p *provider) Provision(status *cli.Status, cfg *config.Cluster) (err error
 	return errors.UntilErrorConcurrent(createContainerFuncs)
 }
 
+// CreateNodes is part of the providers.Provider interface
+func (p *provider) CreateNodes(status *cli.Status, cfg *config.Cluster) (created []nodes.Node, err error) {
+	// discover existing nodes so we can continue naming and default images
+	existing, err := p.ListNodes(cfg.Name)
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) == 0 {
+		return nil, errors.Errorf("no nodes found for cluster %q", cfg.Name)
+	}
+	existingNames := make([]string, 0, len(existing))
+	for _, n := range existing {
+		existingNames = append(existingNames, n.String())
+	}
+
+	// default the image of any new node lacking one to match an existing
+	// kubernetes node in the cluster, so the version stays consistent
+	if err := p.defaultNodeImages(cfg, existing); err != nil {
+		return nil, err
+	}
+
+	// ensure node images are pulled before actually provisioning
+	if err := ensureNodeImages(p.logger, status, cfg); err != nil {
+		return nil, err
+	}
+
+	// ensure the pre-requisite network exists
+	networkName := fixedNetworkName
+	if n := os.Getenv("KIND_EXPERIMENTAL_DOCKER_NETWORK"); n != "" {
+		p.logger.Warn("WARNING: Overriding docker network due to KIND_EXPERIMENTAL_DOCKER_NETWORK")
+		p.logger.Warn("WARNING: Here be dragons! This is not supported currently.")
+		networkName = n
+	}
+	if err := ensureNetwork(networkName); err != nil {
+		return nil, errors.Wrap(err, "failed to ensure docker network")
+	}
+
+	// actually provision the new nodes
+	icons := strings.Repeat("📦 ", len(cfg.Nodes))
+	status.Start(fmt.Sprintf("Preparing nodes %s", icons))
+	defer func() { status.End(err == nil) }()
+
+	createContainerFuncs, newNames, err := planAddNodes(cfg, networkName, existingNames)
+	if err != nil {
+		return nil, err
+	}
+	if err := errors.UntilErrorConcurrent(createContainerFuncs); err != nil {
+		return nil, err
+	}
+
+	created = make([]nodes.Node, 0, len(newNames))
+	for _, name := range newNames {
+		created = append(created, p.node(name))
+	}
+	return created, nil
+}
+
+// defaultNodeImages fills in the Image of any node in cfg that does not have
+// one set, using the image of an existing kubernetes node in the cluster.
+func (p *provider) defaultNodeImages(cfg *config.Cluster, existing []nodes.Node) error {
+	needImage := false
+	for i := range cfg.Nodes {
+		if cfg.Nodes[i].Image == "" {
+			needImage = true
+			break
+		}
+	}
+	if !needImage {
+		return nil
+	}
+	kubeNodes, err := nodeutils.InternalNodes(existing)
+	if err != nil {
+		return err
+	}
+	if len(kubeNodes) == 0 {
+		return errors.Errorf("could not determine node image: cluster %q has no kubernetes nodes", cfg.Name)
+	}
+	image, err := nodeImage(kubeNodes[0].String())
+	if err != nil {
+		return errors.Wrap(err, "failed to determine node image from existing node")
+	}
+	for i := range cfg.Nodes {
+		if cfg.Nodes[i].Image == "" {
+			cfg.Nodes[i].Image = image
+		}
+	}
+	return nil
+}
+
+// nodeImage returns the container image of an existing node
+func nodeImage(name string) (string, error) {
+	cmd := exec.Command("docker", "inspect", "--format", "{{.Config.Image}}", name)
+	lines, err := exec.OutputLines(cmd)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to inspect node image")
+	}
+	if len(lines) != 1 || lines[0] == "" {
+		return "", errors.Errorf("failed to get image for node %q", name)
+	}
+	return lines[0], nil
+}
+
 // ListClusters is part of the providers.Provider interface
 func (p *provider) ListClusters() ([]string, error) {
 	cmd := exec.Command("docker",

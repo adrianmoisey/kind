@@ -129,6 +129,61 @@ func planCreation(cfg *config.Cluster, networkName string) (createContainerFuncs
 	return createContainerFuncs, nil
 }
 
+// planAddNodes is like planCreation but for adding nodes to an already existing
+// cluster. It continues node naming from existingNames (so new nodes do not
+// collide with current ones) and does not provision a load balancer. It returns
+// the container-creation funcs and the names of the nodes that will be created,
+// in the same order as cfg.Nodes.
+//
+// Only worker nodes are supported; adding control-plane nodes is rejected.
+func planAddNodes(cfg *config.Cluster, networkName string, existingNames []string) (createContainerFuncs []func() error, newNames []string, err error) {
+	// name the new nodes, continuing from the existing ones
+	nodeNamer := common.MakeNodeNamerWithExisting(cfg.Name, existingNames)
+	newNames = make([]string, len(cfg.Nodes))
+	for i, node := range cfg.Nodes {
+		newNames[i] = nodeNamer(string(node.Role))
+	}
+
+	// these apply to all container creation, include existing + new names so
+	// NO_PROXY (if any) covers the whole cluster
+	allNames := append(append([]string{}, existingNames...), newNames...)
+	genericArgs, err := commonArgs(cfg.Name, cfg, networkName, allNames)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for i, node := range cfg.Nodes {
+		node := node.DeepCopy() // copy so we can modify
+		name := newNames[i]
+
+		// fixup relative paths, docker can only handle absolute paths
+		for m := range node.ExtraMounts {
+			hostPath := node.ExtraMounts[m].HostPath
+			if !fs.IsAbs(hostPath) {
+				absHostPath, err := filepath.Abs(hostPath)
+				if err != nil {
+					return nil, nil, errors.Wrapf(err, "unable to resolve absolute path for hostPath: %q", hostPath)
+				}
+				node.ExtraMounts[m].HostPath = absHostPath
+			}
+		}
+
+		switch node.Role {
+		case config.WorkerRole:
+			createContainerFuncs = append(createContainerFuncs, func() error {
+				args, err := runArgsForNode(node, cfg.Networking.IPFamily, name, genericArgs)
+				if err != nil {
+					return err
+				}
+				return createContainerWithWaitUntilSystemdReachesMultiUserSystem(name, args)
+			})
+		default:
+			return nil, nil, errors.Errorf("adding nodes with role %q is not supported", node.Role)
+		}
+	}
+	return createContainerFuncs, newNames, nil
+}
+
 // commonArgs computes static arguments that apply to all containers
 func commonArgs(cluster string, cfg *config.Cluster, networkName string, nodeNames []string) ([]string, error) {
 	// standard arguments all nodes containers need, computed once

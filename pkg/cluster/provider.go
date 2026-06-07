@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"sigs.k8s.io/kind/pkg/cmd/kind/version"
 
@@ -30,8 +31,10 @@ import (
 	"sigs.k8s.io/kind/pkg/exec"
 	"sigs.k8s.io/kind/pkg/log"
 
+	internaladdnode "sigs.k8s.io/kind/pkg/cluster/internal/addnode"
 	internalcreate "sigs.k8s.io/kind/pkg/cluster/internal/create"
 	internaldelete "sigs.k8s.io/kind/pkg/cluster/internal/delete"
+	internadeletenode "sigs.k8s.io/kind/pkg/cluster/internal/deletenode"
 	"sigs.k8s.io/kind/pkg/cluster/internal/kubeconfig"
 	internallogs "sigs.k8s.io/kind/pkg/cluster/internal/logs"
 	internalproviders "sigs.k8s.io/kind/pkg/cluster/internal/providers"
@@ -198,6 +201,26 @@ func (p *Provider) Create(name string, options ...CreateOption) error {
 // Delete tears down a kubernetes-in-docker cluster
 func (p *Provider) Delete(name, explicitKubeconfigPath string) error {
 	return internaldelete.Cluster(p.logger, p.provider, defaultName(name), explicitKubeconfigPath)
+}
+
+// AddNodes adds count new worker nodes to an existing cluster, joining them to
+// Kubernetes. If image is empty, the image of an existing node in the cluster
+// is used. If waitForReady is non-zero, it waits up to that long for the new
+// nodes to become Ready.
+func (p *Provider) AddNodes(name string, count int, image string, waitForReady time.Duration) error {
+	return internaladdnode.AddNodes(p.logger, p.provider, &internaladdnode.Options{
+		ClusterName:  defaultName(name),
+		Count:        count,
+		Role:         constants.WorkerNodeRoleValue,
+		Image:        image,
+		WaitForReady: waitForReady,
+	})
+}
+
+// DeleteNode removes a single worker node from an existing cluster, draining it
+// and deleting it from Kubernetes before removing the underlying container.
+func (p *Provider) DeleteNode(name, nodeName string) error {
+	return internadeletenode.DeleteNode(p.logger, p.provider, defaultName(name), nodeName)
 }
 
 // List returns a list of clusters for which nodes exist

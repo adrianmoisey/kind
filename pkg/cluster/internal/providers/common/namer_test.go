@@ -62,3 +62,86 @@ func TestMakeNodeNamer(t *testing.T) {
 		})
 	}
 }
+
+func TestMakeNodeNamerWithExisting(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		clusterName string
+		existing    []string // existing node names in the cluster
+		roles       []string // roles to generate names for
+		want        []string
+	}{
+		{
+			name:        "continue after single worker",
+			clusterName: "kind",
+			existing:    []string{"kind-control-plane", "kind-worker"},
+			roles:       []string{"worker"},
+			want:        []string{"kind-worker2"},
+		},
+		{
+			name:        "continue after multiple workers",
+			clusterName: "kind",
+			existing:    []string{"kind-control-plane", "kind-worker", "kind-worker2", "kind-worker3"},
+			roles:       []string{"worker", "worker"},
+			want:        []string{"kind-worker4", "kind-worker5"},
+		},
+		{
+			name:        "gap from removed node continues after max",
+			clusterName: "kind",
+			existing:    []string{"kind-control-plane", "kind-worker", "kind-worker3"},
+			roles:       []string{"worker"},
+			want:        []string{"kind-worker4"},
+		},
+		{
+			name:        "first worker when none exist",
+			clusterName: "kind",
+			existing:    []string{"kind-control-plane"},
+			roles:       []string{"worker"},
+			want:        []string{"kind-worker"},
+		},
+		{
+			name:        "ignores names without cluster prefix",
+			clusterName: "kind",
+			existing:    []string{"other-worker", "kind-worker"},
+			roles:       []string{"worker"},
+			want:        []string{"kind-worker2"},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var names []string
+			nodeNamer := MakeNodeNamerWithExisting(tc.clusterName, tc.existing)
+			for _, role := range tc.roles {
+				names = append(names, nodeNamer(role))
+			}
+			assert.DeepEqual(t, tc.want, names)
+		})
+	}
+}
+
+func TestSplitRoleIndex(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in        string
+		wantRole  string
+		wantIndex int
+	}{
+		{"worker", "worker", 1},
+		{"worker2", "worker", 2},
+		{"worker10", "worker", 10},
+		{"control-plane", "control-plane", 1},
+		{"control-plane3", "control-plane", 3},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			role, index := splitRoleIndex(tc.in)
+			assert.DeepEqual(t, tc.wantRole, role)
+			assert.DeepEqual(t, tc.wantIndex, index)
+		})
+	}
+}

@@ -31,6 +31,12 @@ type Provider interface {
 	// Provision should create and start the nodes, just short of
 	// actually starting up Kubernetes, based on the given cluster config
 	Provision(status *cli.Status, cfg *config.Cluster) error
+	// CreateNodes provisions and starts additional node containers for an
+	// already existing cluster (cfg.Name), just short of joining them to
+	// Kubernetes. The nodes to create are described by cfg.Nodes and are named
+	// continuing from the cluster's existing nodes. It returns handles to the
+	// newly created nodes, in the same order as cfg.Nodes.
+	CreateNodes(status *cli.Status, cfg *config.Cluster) ([]nodes.Node, error)
 	// ListClusters discovers the clusters that currently have resources
 	// under this providers
 	ListClusters() ([]string, error)

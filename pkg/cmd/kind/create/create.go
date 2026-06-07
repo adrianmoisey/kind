@@ -24,6 +24,7 @@ import (
 
 	"sigs.k8s.io/kind/pkg/cmd"
 	createcluster "sigs.k8s.io/kind/pkg/cmd/kind/create/cluster"
+	createnode "sigs.k8s.io/kind/pkg/cmd/kind/create/node"
 	"sigs.k8s.io/kind/pkg/log"
 )
 
@@ -31,8 +32,8 @@ import (
 func NewCommand(logger log.Logger, streams cmd.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Creates one of [cluster]",
-		Long:  "Creates one of local Kubernetes cluster (cluster)",
+		Short: "Creates one of [cluster, node]",
+		Long:  "Creates one of [cluster, node]",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			err := cmd.Help()
 			if err != nil {
@@ -42,5 +43,6 @@ func NewCommand(logger log.Logger, streams cmd.IOStreams) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(createcluster.NewCommand(logger, streams))
+	cmd.AddCommand(createnode.NewCommand(logger, streams))
 	return cmd
 }

@@ -84,7 +84,7 @@ func joinSecondaryControlPlanes(
 	// (this is not safe currently)
 	for _, node := range secondaryControlPlanes {
 		node := node // capture loop variable
-		if err := runKubeadmJoin(ctx.Logger, node); err != nil {
+		if err := RunKubeadmJoin(ctx.Logger, node); err != nil {
 			return err
 		}
 	}
@@ -105,7 +105,7 @@ func joinWorkers(
 	for _, node := range workers {
 		node := node // capture loop variable
 		fns = append(fns, func() error {
-			return runKubeadmJoin(ctx.Logger, node)
+			return RunKubeadmJoin(ctx.Logger, node)
 		})
 	}
 	if err := errors.UntilErrorConcurrent(fns); err != nil {
@@ -116,8 +116,9 @@ func joinWorkers(
 	return nil
 }
 
-// runKubeadmJoin executes kubeadm join command
-func runKubeadmJoin(logger log.Logger, node nodes.Node) error {
+// RunKubeadmJoin executes the kubeadm join command on the given node. The node
+// must already have a kubeadm join config written to /kind/kubeadm.conf.
+func RunKubeadmJoin(logger log.Logger, node nodes.Node) error {
 	kubeVersionStr, err := nodeutils.KubeVersion(node)
 	if err != nil {
 		return errors.Wrap(err, "failed to get kubernetes version from node")
